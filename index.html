@@ -24,23 +24,52 @@
 
 		// 页面加载完毕时执行的初始化准备函数
 		function onLoad() {
-			// 获取视频元素和画布元素
-			video = document.getElementById("video");
-			canvas = document.getElementById("cam");
-			context = canvas.getContext("2d");
-			
-			// 初始化 canvas 的宽高
-			canvas.width = parseInt(canvas.style.width) || canvas.width;  // 如果样式中没有宽度，则保持默认宽度
-			canvas.height = parseInt(canvas.style.height) || canvas.height;  // 如果样式中没有高度，则保持默认高度
-
-			// 检查浏览器是否支持现代的 getUserMedia API
-			if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-				init();  // 如果支持，则调用初始化函数
-			} else {
-				console.log("此浏览器不支持 getUserMedia API.");  // 如果不支持，输出错误信息
-			}
-		}
+		    // 获取视频元素和画布元素
+		    video = document.getElementById("video");
+		    canvas = document.getElementById("cam");
+		    context = canvas.getContext("2d");
 		
+		    // 初始化 canvas 的宽高
+		    canvas.width = parseInt(canvas.style.width) || canvas.width;  // 如果样式中没有宽度，则保持默认宽度
+		    canvas.height = parseInt(canvas.style.height) || canvas.height;  // 如果样式中没有高度，则保持默认高度
+		
+		    // 检查浏览器是否支持现代的 getUserMedia API
+		    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+		        // 优先选择前置摄像头
+		        var constraints = {
+		            video: {
+		                facingMode: { exact: "user" }  // 优先使用前置摄像头
+		            }
+		        };
+		
+		        // 调用 getUserMedia，使用指定约束
+		        navigator.mediaDevices.getUserMedia(constraints)
+		            .then(function (stream) {
+		                video.srcObject = stream;  // 将摄像头视频流赋值给 video 元素
+		                video.play();  // 播放视频
+		            })
+		            .catch(function (err) {
+		                console.log("无法访问前置摄像头:", err);
+		                // 如果无法访问前置摄像头，可以尝试后置摄像头
+		                var fallbackConstraints = {
+		                    video: {
+		                        facingMode: { exact: "environment" }  // 改为后置摄像头
+		                    }
+		                };
+		                navigator.mediaDevices.getUserMedia(fallbackConstraints)
+		                    .then(function (stream) {
+		                        video.srcObject = stream;  // 将摄像头视频流赋值给 video 元素
+		                        video.play();  // 播放视频
+		                    })
+		                    .catch(function (err) {
+		                        console.log("前后摄像头都无法访问:", err);  // 如果都无法访问，输出错误信息
+		                    });
+		            });
+		    } else {
+		        console.log("此浏览器不支持 getUserMedia API.");  // 如果不支持，输出错误信息
+		    }
+		}
+
 		// 初始化函数
 		function init() {
 			// 调用 getUserMedia 获取视频流

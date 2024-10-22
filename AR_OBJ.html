@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<title>Augmented Reality</title>
+
+	<script type="text/javascript" src="libs/Three.js"></script> 
+	<script type="text/javascript" src="libs/svd.js"></script> 
+	<script type="text/javascript" src="libs/posit1.js"></script> 
+	<script type="text/javascript" src="libs/cv.js"></script> 
+	<script type="text/javascript" src="libs/aruco.js"></script> 
+	<script type="text/javascript" src="libs/OBJLoader.js"></script> 
+
+	<script>
+		
+		var video, canvas, context, imageData, detector, posit;
+		var renderer1;
+		var scene1, scene2;
+		var camera1, camera2;
+		var model, texture;
+		var step = 0.0;
+
+		var modelSize = 25.0;	//millimeters
+
+		// 页面加载完毕时执行的初始化准备函数
+		function onLoad() {
+			// 获取视频元素和画布元素
+			video = document.getElementById("video");
+			canvas = document.getElementById("cam");
+			context = canvas.getContext("2d");
+			
+			// 初始化 canvas 的宽高
+			canvas.width = parseInt(canvas.style.width) || canvas.width;  // 如果样式中没有宽度，则保持默认宽度
+			canvas.height = parseInt(canvas.style.height) || canvas.height;  // 如果样式中没有高度，则保持默认高度
+
+			// 检查浏览器是否支持现代的 getUserMedia API
+			if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+				init();  // 如果支持，则调用初始化函数
+			} else {
+				console.log("此浏览器不支持 getUserMedia API.");  // 如果不支持，输出错误信息
+			}
+		}
+		
+		// 初始化函数
+		function init() {
+			// 调用 getUserMedia 获取视频流
+			navigator.mediaDevices.getUserMedia({ video: true })
+				.then(function(stream) {
+					// 将视频流赋值给 video 元素的 srcObject 属性
+					video.srcObject = stream;
+					video.play();  // 播放视频
+				})
+				.catch(function(error) {
+					// 捕获并处理可能的错误，例如用户拒绝摄像头权限
+					console.error("访问媒体设备时出错。", error);
+				});
+
+			// 初始化 AR 检测器
+			detector = new AR.Detector();
+			
+			// 初始化 POS 模型，传入模型大小和画布宽度
+			posit = new POS.Posit(modelSize, canvas.width);
+
+			// 创建渲染器和场景
+			createRenderers();
+			createScenes();
+
+			// 启动动画帧更新循环
+			requestAnimationFrame(tick);
+		}	
+		
+		// 实时图像处理和渲染循环
+		function tick(){
+			// 使用 requestAnimationFrame 创建一个动画帧循环，递归调用 tick 函数
+			requestAnimationFrame(tick);
+		    
+			// 检查视频元素的 readyState，确保视频已经加载并有足够的数据进行处理
+			if (video.readyState === video.HAVE_ENOUGH_DATA){
+				snapshot();
+				// 使用 AR 检测器对当前帧进行检测，获取标记点数据
+				var markers = detector.detect(imageData);
+				// 绘制检测到的标记点的角点信息
+				drawCorners(markers);
+				// 更新场景，根据检测到的标记点调整场景或对象
+				updateScenes(markers);
+				// 渲染场景，显示更新后的结果
+				render();
+			}
+		};
+		
+		// 将当前视频帧绘制到 canvas 上，并获取该帧的图像数据
+		function snapshot(){
+			// 将视频当前帧绘制到 canvas 上
+			context.drawImage(video, 0, 0, canvas.width, canvas.height);
+			// 从 canvas 中获取绘制的图像数据，用于后续的图像处理
+			imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+		};
+		
+		// 绘制AR标记的角点
+		function drawCorners(markers){
+			var corners, corner, i, j;
+			// 设置线条宽度为 3 像素
+			context.lineWidth = 3;
+			
+			// 遍历所有检测到的标记物
+			for (i = 0; i < markers.length; ++ i){
+				// 获取当前标记物的角点信息
+				corners = markers[i].corners;
+				
+				context.strokeStyle = "red";	// 设置线条颜色为红色，用于绘制多边形边框
+				context.beginPath();			// 开始绘制路径
+				
+				// 遍历每个角点，并绘制多边形的边
+				for (j = 0; j < corners.length; ++ j){
+				  corner = corners[j];
+				  // 移动画笔到当前角点
+				  context.moveTo(corner.x, corner.y);
+				  // 获取下一个角点（形成闭合路径，最后一个点连接到第一个点）
+				  corner = corners[(j + 1) % corners.length];
+				  // 绘制一条从当前角点到下一个角点的线
+				  context.lineTo(corner.x, corner.y);
+				}
+
+				context.stroke();
+				context.closePath();	// 关闭路径
+				
+				context.strokeStyle = "green";	// 设置线条颜色为绿色，用于绘制标记物的第一个角点
+				context.strokeRect(corners[0].x - 2, corners[0].y - 2, 4, 4);	// 标记第一个角点
+			}
+		};
+		
+		// 初始化渲染器、设置渲染环境
+		function createRenderers(){
+
+			renderer1 = new THREE.WebGLRenderer();		// 创建一个 WebGL 渲染器
+			renderer1.setClearColor(0xffffff, 1);   	// 设置背景色（十六进制色，透明度）
+			renderer1.setSize(canvas.width, canvas.height);		// 设置渲染器的大小
+			document.getElementById("container").appendChild(renderer1.domElement);
+			
+			// 创建第一个场景（scene1）和一个正交摄像机
+			scene1 = new THREE.Scene();
+			camera1 = new THREE.OrthographicCamera(-0.5, 0.5, 0.5, -0.5);
+			scene1.add(camera1);
+			
+			// 创建第二个场景（scene2）和一个透视摄像机
+			scene2 = new THREE.Scene();
+			camera2 = new THREE.PerspectiveCamera(40, canvas.width / canvas.height, 1, 1000);
+			scene2.add(camera2);
+		};
+		
+		// 渲染场景
+		function render(){
+
+		  renderer1.autoClear = false;		// 设置 renderer1 不自动清除画布
+		  renderer1.clear();				// 清除渲染器的当前内容		
+		  renderer1.render(scene1, camera1);	// 渲染第一个场景
+		  renderer1.render(scene2, camera2);	// 渲染第二个场景
+		};
+		
+		// 创建场景
+		function createScenes(){
+		
+		  model = createModel();	// 创建模型
+		  scene2.add(model);		// 将模型添加到第二个场景
+		  
+		  texture = createTexture();	// 创建纹理
+		  scene1.add(texture);			// 将纹理添加到第一个场景
+		};
+		
+		// 把视频数据流产生到平面场景（scene1）中
+		function createTexture(){
+			var texture = new THREE.Texture(video),
+			  object = new THREE.Object3D(),
+			  geometry = new THREE.PlaneGeometry(1.0, 1.0, 0.0),
+			  material = new THREE.MeshBasicMaterial( {map: texture, depthTest: false, depthWrite: false} ),
+			  mesh = new THREE.Mesh(geometry, material);
+
+			object.position.z = -1;
+
+			object.add(mesh);
+
+			return object;
+		};
+	  
+		// 加载 .OBJ 模型
+		function createModel() {
+			// 创建一个新的场景
+			scene = new THREE.Scene();
+
+			// 创建正交摄像机
+			camera = new THREE.OrthographicCamera(-5, 5, 3.75, -3.75, 0.1, 100);
+			camera.position.set(15, 25, 25);
+			camera.lookAt(new THREE.Vector3(0, 2, 0));
+			scene.add(camera);
+
+			// 创建一个方向光源
+			var light = new THREE.DirectionalLight(0xffffff, 1);
+			light.position.set(15, 15, 25);
+			scene.add(light);
+
+			// 加载 OBJ 模型
+			const objLoader = new THREE.OBJLoader();
+			objLoader.load('model/wooden.obj', function(object) {
+				// 输出模型信息
+				console.log(object);		
+			
+				object.position.set(0, 0, 0);  // 可根据需要设置位置
+				object.scale.set(0.005, 0.005, 0.005); // 缩放模型
+				object.rotation.x = Math.PI / 2;	// 调整模型底座和AR标记平面平行（非必要）
+				
+				scene.add(object);	// 将加载的模型添加到场景中
+			}, undefined, function(error) {
+				console.error('An error happened while loading the OBJ model', error);
+			});
+
+			// 返回创建的场景，包含摄像机、光源和加载的模型
+			return scene;
+		}
+
+		// 更新场景中的 3D 模型，使其与 AR 检测到的标记物对齐	
+		function updateScenes(markers){
+		  var corners, corner, pose, i;
+		  
+		  // 如果检测到标记物（至少一个）
+		  if (markers.length > 0){
+			corners = markers[0].corners;
+			
+			// 遍历每个角点，调整它们的坐标系
+			for (i = 0; i < corners.length; ++ i){
+				corner = corners[i];
+				// 调整角点的 x 坐标，以画布中心为原点
+				corner.x = corner.x - (canvas.width / 2);
+				// 调整角点的 y 坐标，翻转 y 轴，使画布中心为原点
+				corner.y = (cam.height / 2) - corner.y;
+			}
+			// 使用 POS 模型计算标记物的位姿（位置和旋转角度）
+			pose = posit.pose(corners);
+			// 更新 3D 模型的位置和旋转角度，使其与标记物对齐
+			updateObject(model, pose.bestRotation, pose.bestTranslation);
+			
+			step += 0.025;		// 增加旋转的步长，用于持续旋转模型
+			
+			model.rotation.z -= step;
+		  }
+		  
+		  texture.children[0].material.map.needsUpdate = true;
+		};
+		
+		// 根据标记物的位姿，更新 3D 模型的缩放、旋转和位置
+		function updateObject(object, rotation, translation){
+			// 设置模型的缩放比例，保持与标记物大小一致
+			object.scale.x = modelSize;
+			object.scale.y = modelSize;
+			object.scale.z = modelSize;
+			
+			// 根据姿态估计的结果，设置模型的旋转角度
+			object.rotation.x = -Math.asin(-rotation[1][2]);		// 根据旋转矩阵计算 x 轴旋转
+			object.rotation.y = -Math.atan2(rotation[0][2], rotation[2][2]);	// 根据旋转矩阵计算 y 轴旋转	
+			object.rotation.z = Math.atan2(rotation[1][0], rotation[1][1]);		// 根据旋转矩阵计算 z 轴旋转
+			
+			// 根据姿态估计的结果，设置模型的位置
+			object.position.x = translation[0];		// 设置 x 坐标
+			object.position.y = translation[1];		// 设置 y 坐标
+			object.position.z = -translation[2];	// 设置 z 坐标（取负号以符合三维坐标系）
+		};
+		
+		// 网页的所有内容加载完毕之后，浏览器自动调用onLoad函数
+		window.onload = onLoad;	
+	
+	</script>
+	
+</head>
+
+
+<body style="text-align: center; font-family: monospace;">
+
+	<video id="video" width=320 height=240 autoplay="true" style="display:none;"></video> 
+
+	<div style="width: 100%;">
+	<div style="width: 650px;">
+		<!-- 显示原始视频数据识别情况 -->
+		<canvas id="cam" style="width: 600px; height: 450px; float: left;"></canvas>
+		<!--显示AR部分（下面的视窗）-->
+		<div id="container" style="width: 600px; height: 450px; float: left; background: white;"></div>
+		<div style="clear: both;"></div>
+	</div>
+	</div>
+	<div style="clear: both;"></div>
+  
+</body>
+  
+</html>

@@ -1,0 +1,261 @@
+<html>
+
+<head>
+  <title>Augmented Reality</title>
+
+	<script type="text/javascript" src="libs/Three.js"></script> 
+	<script type="text/javascript" src="libs/svd.js"></script> 
+	<script type="text/javascript" src="libs/posit1.js"></script> 
+	<script type="text/javascript" src="libs/cv.js"></script> 
+	<script type="text/javascript" src="libs/aruco.js"></script> 
+	<script type="text/javascript" src="libs/OBJLoader.js"></script> 
+  
+  <script>
+    var video, canvas, context, imageData, detector, posit;
+    var renderer3;
+    var scene3, scene4;
+    var camera3, camera4;
+    var model, texture;
+    var step = 0.0;
+
+    var modelSize = 25.0; //millimeters
+
+	// 页面加载完毕时执行的初始化准备函数
+	function onLoad() {
+		// 获取视频元素和画布元素
+		video = document.getElementById("video");
+		canvas = document.getElementById("cam");
+		context = canvas.getContext("2d");
+		
+		// 确保 canvas 的宽高被正确初始化
+		canvas.width = parseInt(canvas.style.width) || canvas.width;  // 如果样式中没有宽度，则保持默认宽度
+		canvas.height = parseInt(canvas.style.height) || canvas.height;  // 如果样式中没有高度，则保持默认高度
+
+		// 检查浏览器是否支持现代的 getUserMedia API
+		if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+			init();  // 如果支持，则调用初始化函数
+		} else {
+			console.log("此浏览器不支持 getUserMedia API.");  // 如果不支持，输出错误信息
+		}
+	}
+	
+	// 初始化函数
+	function init() {
+		// 调用 getUserMedia 获取视频流
+		navigator.mediaDevices.getUserMedia({ video: true })
+			.then(function(stream) {
+				// 将视频流赋值给 video 元素的 srcObject 属性
+				video.srcObject = stream;
+				video.play();  // 播放视频
+			})
+			.catch(function(error) {
+				// 捕获并处理可能的错误，例如用户拒绝摄像头权限
+				console.error("访问媒体设备时出错。", error);
+			});
+
+		// 初始化 AR 检测器
+		detector = new AR.Detector();
+		
+		// 初始化 POS 模型，传入模型大小和画布宽度
+		posit = new POS.Posit(modelSize, canvas.width);
+
+		// 创建渲染器和场景
+		createRenderers();
+		createScenes();
+
+		// 启动动画帧更新循环
+		requestAnimationFrame(tick);
+	}	
+
+    function tick(){
+      requestAnimationFrame(tick);
+      
+      if (video.readyState === video.HAVE_ENOUGH_DATA){
+        snapshot();
+
+        var markers = detector.detect(imageData);
+        drawCorners(markers);
+        updateScenes(markers);
+        
+        render();
+      }
+    };
+
+    function snapshot(){
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+    };
+    
+    function drawCorners(markers){
+      var corners, corner, i, j;
+    
+      context.lineWidth = 3;
+
+      for (i = 0; i < markers.length; ++ i){
+        corners = markers[i].corners;
+        
+        context.strokeStyle = "red";
+        context.beginPath();
+        
+        for (j = 0; j < corners.length; ++ j){
+          corner = corners[j];
+          context.moveTo(corner.x, corner.y);
+          corner = corners[(j + 1) % corners.length];
+          context.lineTo(corner.x, corner.y);
+        }
+
+        context.stroke();
+        context.closePath();
+        
+        context.strokeStyle = "green";
+        context.strokeRect(corners[0].x - 2, corners[0].y - 2, 4, 4);
+      }
+    };
+
+    function createRenderers(){
+
+      renderer3 = new THREE.WebGLRenderer();
+      renderer3.setClearColor(0xffffff, 1);   //设置背景色（十六进制色，透明度）
+      renderer3.setSize(canvas.width, canvas.height);
+      document.getElementById("container").appendChild(renderer3.domElement);
+      
+      scene3 = new THREE.Scene();
+      camera3 = new THREE.OrthographicCamera(-0.5, 0.5, 0.5, -0.5);
+      scene3.add(camera3);
+      
+      scene4 = new THREE.Scene();
+      camera4 = new THREE.PerspectiveCamera(40, canvas.width / canvas.height, 1, 1000);
+      scene4.add(camera4);
+    };
+
+    function render(){
+
+      renderer3.autoClear = false;
+      renderer3.clear();
+      renderer3.render(scene3, camera3);
+      renderer3.render(scene4, camera4);
+    };
+
+    function createScenes(){
+    
+      model = createModel();
+      scene4.add(model);
+	  
+	  texture = createTexture();
+      scene3.add(texture);
+	  
+    };
+    
+	//把视频数据流产生到一个平面场景中（scene3）
+    function createTexture(){
+      var texture = new THREE.Texture(video),
+          object = new THREE.Object3D(),
+          geometry = new THREE.PlaneGeometry(1.0, 1.0, 0.0),
+          material = new THREE.MeshBasicMaterial( {map: texture, depthTest: false, depthWrite: false} ),
+          mesh = new THREE.Mesh(geometry, material);
+      
+      object.position.z = -1;
+      
+      object.add(mesh);
+      
+      return object;
+    };
+  
+  
+	function createModel() {
+		// 创建一个新的场景
+		scene = new THREE.Scene();
+
+		// 创建正交摄像机
+		camera = new THREE.OrthographicCamera(-5, 5, 3.75, -3.75, 0.1, 100);
+		camera.position.set(15, 25, 25);
+		camera.lookAt(new THREE.Vector3(0, 2, 0));
+		scene.add(camera);
+
+		// 创建立方体的几何体和材质
+		var geometry = new THREE.BoxGeometry(2, 2, 2); // 创建一个 2x2x2 的立方体
+		var material = new THREE.MeshLambertMaterial({ color: 0xffff00 }); // 黄色材质
+
+		// 将几何体和材质组合为网格对象
+		var cube = new THREE.Mesh(geometry, material);
+
+		// 将立方体添加到场景中
+		scene.add(cube);
+
+		// 创建一个方向光，设置光的位置并添加到场景中
+		var light = new THREE.DirectionalLight(0xffffff, 1);
+		light.position.set(15, 15, 25);
+		scene.add(light);
+
+		// 返回场景
+		return scene;
+	}
+	
+		
+    function updateScenes(markers){
+      var corners, corner, pose, i;
+      
+      if (markers.length > 0){
+        corners = markers[0].corners;
+        
+        for (i = 0; i < corners.length; ++ i){
+          corner = corners[i];
+          
+          corner.x = corner.x - (canvas.width / 2);
+          corner.y = (cam.height / 2) - corner.y;
+        }
+        
+        pose = posit.pose(corners);
+        
+        updateObject(model, pose.bestRotation, pose.bestTranslation);
+        
+        step += 0.025;
+        
+        model.rotation.z -= step;
+      }
+      
+      texture.children[0].material.map.needsUpdate = true;
+    };
+    
+    function updateObject(object, rotation, translation){
+      object.scale.x = modelSize;
+      object.scale.y = modelSize;
+      object.scale.z = modelSize;
+      
+      object.rotation.x = -Math.asin(-rotation[1][2]);
+      object.rotation.y = -Math.atan2(rotation[0][2], rotation[2][2]);
+      object.rotation.z = Math.atan2(rotation[1][0], rotation[1][1]);
+
+      object.position.x = translation[0];
+      object.position.y = translation[1];
+      object.position.z = -translation[2];
+    };
+
+    window.onload = onLoad;
+	
+  </script>
+
+</head>
+
+<body style="text-align: center; font-family: monospace;">
+
+  <video id="video" width=280 height=210 autoplay="true" style="display:none;"></video> 
+  <!-- 显示原始视频数据识别情况 -->
+  
+  <!-- <div style="margin: 10px;"><strong>-= Augmented Reality =-</strong></div> -->
+  <div style="margin: 15px;"><strong>Powered by <a href="http://code.google.com/p/js-aruco/">js-aruco</a> and <a href="https://github.com/mrdoob/three.js">Three.js</a></strong></div> 
+  
+  <div style="width: 100%;">
+    <div style="width: 650px;">
+	  <!--显示摄像头数据流（上面的视窗）-->
+      <canvas id="cam" style="width: 400px; height: 300px; float: left;"></canvas>
+	  <!--显示AR部分（下面的视窗）-->
+      <div id="container" style="width: 400px; height: 300px; float: left; background: white;"></div>
+      <div style="clear: both;"></div>
+    </div>
+  </div>
+  <div style="clear: both;"></div>
+  
+</body>
+  
+</html>
